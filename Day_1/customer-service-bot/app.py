@@ -14,7 +14,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_MODEL = "deepseek-v4-flash"
 
-api_key = os.getenv("DEEPSEEK_API_KEY", "sk-71937bb4666244f1ba9bc34cea213374")
+api_key = os.getenv("DEEPSEEK_API_KEY", "sk-89da84b1374a4e1bba569894d422a28f")
 # 注意：在实际使用时，请将上面的默认值替换为真实的API Key
 
 client = OpenAI(

@@ -1,8 +1,8 @@
 import os
 import re
-import numpy as np
 from openai import OpenAI
 from typing import List, Dict, Tuple
+from collections import Counter
 
 # 知识库内容
 knowledge_base = """
@@ -93,17 +93,17 @@ C300 型号的全自动咖啡机是一款专为家庭和小型办公室设计的
 在咖啡粉容器中加入新鲜咖啡豆，确保咖啡豆是新鲜的，且不超过250g。
 加满水箱，确保水源洁净。
 开启咖啡机
-按下“开/关”按钮，等待咖啡机启动完成。
+按下"开/关"按钮，等待咖啡机启动完成。
 设置所需咖啡类型：浓缩、拿铁或卡布奇诺，选择适合的杯量与强度。
 制作咖啡
-选择咖啡模式（例如：Espresso 或 Cappuccino），然后点击“开始”按钮。
+选择咖啡模式（例如：Espresso 或 Cappuccino），然后点击"开始"按钮。
 咖啡机会自动进行研磨、萃取和加热，完成后自动停止。
 如果选择的是拿铁或卡布奇诺，机器会同时进行奶泡制作，奶泡将自动加入到咖啡中。
 调整个人偏好
 若您需要调整咖啡的温度或浓度，按下设置按钮，调整温度和浓度等级。
 可选择不同的杯量（小、中、大），咖啡机会根据设置量自动调整。
 关闭咖啡机
-使用完毕后，按下“关机”按钮，关闭咖啡机。
+使用完毕后，按下"关机"按钮，关闭咖啡机。
 建议定期清洗机器，尤其是咖啡渣盒和奶泡管。
 常见问题解答（FAQ）
 咖啡机启动后没有水流出
@@ -200,7 +200,7 @@ E400 型号的空气炸锅采用了先进的热风循环技术，能够在无需
 烹饪完成后，设备会自动停止并发出提醒音。打开炸篮并小心取出食物。
 设备将在烹饪结束后自动停止运行，确保安全。
 关闭设备
-使用完毕后，按下“关闭”按钮，拔掉电源插头，进行清洁。
+使用完毕后，按下"关闭"按钮，拔掉电源插头，进行清洁。
 常见问题解答（FAQ）
 空气炸锅的食物为何不够脆？
 可能原因：食物表面没有完全干燥或油量不足。
@@ -254,15 +254,11 @@ class RAGSystem:
         )
         
         self.chunks = []
-        self.embeddings = []
         self._initialize_knowledge_base()
     
     def _initialize_knowledge_base(self):
-        """初始化知识库，进行文本分块和向量存储"""
-        # 文本分块
+        """初始化知识库，进行文本分块"""
         self.chunks = self._split_text(knowledge_base)
-        # 生成向量
-        self.embeddings = self._generate_embeddings(self.chunks)
     
     def _split_text(self, text: str, chunk_size: int = 500) -> List[str]:
         """文本分块"""
@@ -289,52 +285,43 @@ class RAGSystem:
         
         return chunks
     
-    def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """生成文本向量"""
-        embeddings = []
-        for text in texts:
-            try:
-                response = self.client.embeddings.create(
-                    model="deepseek-embedding-v1",
-                    input=text
-                )
-                embeddings.append(response.data[0].embedding)
-            except Exception as e:
-                print(f"生成向量时出错: {e}")
-                # 使用随机向量作为备用
-                embeddings.append([0.0] * 1536)
-        return embeddings
+    def _extract_keywords(self, text: str) -> List[str]:
+        """提取关键词"""
+        # 提取所有词，包括产品型号
+        words = re.findall(r'[\w]+', text)
+        # 提取产品型号（如A1000、B200等）
+        model_numbers = re.findall(r'[A-Z]\d+', text)
+        # 过滤掉常见停用词
+        stop_words = {'的', '是', '在', '有', '和', '了', '不', '能', '可以', '这个', '那个', '什么', '如何', '怎么', '吗', '呢', '啊', '吧', '哦', '嗯'}
+        keywords = [word for word in words if len(word) > 1 and word not in stop_words]
+        # 添加产品型号
+        keywords.extend(model_numbers)
+        return keywords
     
-    def _cosine_similarity(self, vector_a: List[float], vector_b: List[float]) -> float:
-        """计算余弦相似度"""
-        vector_a = np.array(vector_a)
-        vector_b = np.array(vector_b)
-        return np.dot(vector_a, vector_b) / (
-            np.linalg.norm(vector_a) * np.linalg.norm(vector_b)
-        )
+    def _calculate_similarity(self, query: str, chunk: str) -> float:
+        """计算查询和文本块的相似度（基于关键词匹配）"""
+        query_keywords = set(self._extract_keywords(query))
+        chunk_keywords = set(self._extract_keywords(chunk))
+        
+        if not query_keywords:
+            return 0.0
+        
+        # 计算交集
+        intersection = query_keywords & chunk_keywords
+        # 计算相似度
+        similarity = len(intersection) / len(query_keywords)
+        return similarity
     
     def retrieve_relevant_chunks(self, query: str, top_k: int = 3) -> List[str]:
         """检索相关文本块"""
-        # 生成查询向量
-        try:
-            response = self.client.embeddings.create(
-                model="deepseek-embedding-v1",
-                input=query
-            )
-            query_embedding = response.data[0].embedding
-        except Exception as e:
-            print(f"生成查询向量时出错: {e}")
-            return []
-        
-        # 计算相似度
         similarities = []
-        for i, embedding in enumerate(self.embeddings):
-            similarity = self._cosine_similarity(query_embedding, embedding)
+        for i, chunk in enumerate(self.chunks):
+            similarity = self._calculate_similarity(query, chunk)
             similarities.append((i, similarity))
         
         # 排序并返回最相关的文本块
         similarities.sort(key=lambda x: x[1], reverse=True)
-        top_chunks = [self.chunks[i] for i, _ in similarities[:top_k]]
+        top_chunks = [self.chunks[i] for i, _ in similarities[:top_k] if _ > 0]
         return top_chunks
     
     def generate_answer(self, query: str) -> str:
@@ -342,33 +329,53 @@ class RAGSystem:
         # 检索相关文本
         relevant_chunks = self.retrieve_relevant_chunks(query)
         
-        if not relevant_chunks:
-            return "抱歉，我无法回答这个问题。"
-        
-        # 构建提示
-        context = "\n".join(relevant_chunks)
-        prompt = f"你是家护公司的客服助手，根据以下知识库内容回答用户问题：\n\n{context}\n\n用户问题：{query}\n\n请基于知识库内容回答，不要添加知识库中没有的信息。"
-        
-        # 生成回答
-        try:
-            response = self.client.chat.completions.create(
-                model="deepseek-v4-flash",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "你是家护公司的客服助手，回答要准确、简洁，基于提供的知识库内容。"
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.3
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            print(f"生成回答时出错: {e}")
-            return "抱歉，我无法回答这个问题。"
+        if relevant_chunks:
+            # 构建提示
+            context = "\n".join(relevant_chunks)
+            prompt = f"你是家护公司的客服助手，根据以下知识库内容回答用户问题：\n\n{context}\n\n用户问题：{query}\n\n请基于知识库内容回答，不要添加知识库中没有的信息。"
+            
+            # 生成回答
+            try:
+                response = self.client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是家护公司的客服助手，回答要准确、简洁，基于提供的知识库内容。"
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=0.3
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                print(f"生成回答时出错: {e}")
+                # 如果生成回答失败，直接返回检索到的相关文本
+                return relevant_chunks[0] if relevant_chunks else "抱歉，我无法回答这个问题。"
+        else:
+            # 知识库中没有相关内容，直接调用DeepSeek API
+            try:
+                response = self.client.chat.completions.create(
+                    model="deepseek-v4-flash",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是家护公司的客服助手，回答用户的问题。"
+                        },
+                        {
+                            "role": "user",
+                            "content": query
+                        }
+                    ],
+                    temperature=0.3
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                print(f"调用DeepSeek API时出错: {e}")
+                return "抱歉，我无法回答这个问题。"
 
 # 全局RAG系统实例
 rag_system = None
