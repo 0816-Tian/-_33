@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from openai import OpenAI
 
 app = FastAPI()
@@ -51,4 +51,4 @@ async def chat(request: Request):
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Customer Service Bot!"}
+    return RedirectResponse(url="/static/index.html")
