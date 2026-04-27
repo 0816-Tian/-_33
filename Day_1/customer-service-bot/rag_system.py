@@ -247,9 +247,10 @@ class RAGSystem:
         # 使用与app.py相同的默认API Key
         self.api_key = os.getenv("DEEPSEEK_API_KEY", "sk-89da84b1374a4e1bba569894d422a28f")
         
+        # 使用正确的DeepSeek API端点
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url="https://api.deepseek.com"
+            base_url="https://api.deepseek.com/v1"
         )
         
         self.chunks = []
@@ -303,7 +304,8 @@ class RAGSystem:
         chunk_keywords = set(self._extract_keywords(chunk))
         
         if not query_keywords:
-            return 0.0
+            # 如果查询没有关键词（如"你好"），直接返回1.0
+            return 1.0
         
         # 计算交集
         intersection = query_keywords & chunk_keywords
@@ -325,6 +327,12 @@ class RAGSystem:
     
     def generate_answer(self, query: str) -> str:
         """生成回答"""
+        # 处理问候语
+        greetings = ['你好', '您好', '嗨', 'Hello', 'hi', 'hey']
+        for greeting in greetings:
+            if greeting in query:
+                return "你好！我是家护公司客服助手，有什么关于家电产品的问题可以帮助你？"
+        
         # 检索相关文本
         relevant_chunks = self.retrieve_relevant_chunks(query)
         
