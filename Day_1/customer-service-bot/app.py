@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, RedirectResponse
 from openai import OpenAI
+from rag_system import get_rag_system
 
 app = FastAPI()
 
@@ -27,27 +28,13 @@ async def chat(request: Request):
     message = data.get("message", "")
     
     try:
-        # 调用大模型API
-        completion = client.chat.completions.create(
-            model=DEEPSEEK_CHAT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是自然语言处理课程助教，回答要准确、简洁。",
-                },
-                {
-                    "role": "user",
-                    "content": message,
-                },
-            ],
-            temperature=0.3,
-        )
-        
-        answer = completion.choices[0].message.content
+        # 使用RAG系统生成回答
+        rag_system = get_rag_system()
+        answer = rag_system.generate_answer(message)
         return JSONResponse({"answer": answer})
     except Exception as e:
         # 捕获所有异常，确保返回有效的JSON响应
-        return JSONResponse({"answer": f"抱歉，调用大模型API时出现错误：{str(e)}"})
+        return JSONResponse({"answer": f"抱歉，调用RAG系统时出现错误：{str(e)}"})
 
 @app.get("/")
 async def root():
