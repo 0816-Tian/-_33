@@ -244,9 +244,8 @@ E400 型号的空气炸锅采用了先进的热风循环技术，能够在无需
 class RAGSystem:
     def __init__(self):
         """初始化RAG系统"""
-        self.api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not self.api_key:
-            raise RuntimeError("没有读取到环境变量 DEEPSEEK_API_KEY")
+        # 使用与app.py相同的默认API Key
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "sk-89da84b1374a4e1bba569894d422a28f")
         
         self.client = OpenAI(
             api_key=self.api_key,
