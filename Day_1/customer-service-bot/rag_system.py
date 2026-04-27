@@ -246,19 +246,36 @@ class RAGSystem:
         """初始化RAG系统"""
         # 使用与app.py相同的默认API Key
         self.api_key = os.getenv("DEEPSEEK_API_KEY", "sk-89da84b1374a4e1bba569894d422a28f")
+        print(f"RAGSystem initialized with API key: {self.api_key[:6]}...")
         
         # 使用正确的DeepSeek API端点
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url="https://api.deepseek.com/v1"
-        )
+        try:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url="https://api.deepseek.com/v1"
+            )
+            print("OpenAI client initialized successfully")
+        except Exception as e:
+            print(f"Failed to initialize OpenAI client: {e}")
+            self.client = None
         
         self.chunks = []
         self._initialize_knowledge_base()
+        
+        # 家电相关关键词
+        self.appliance_keywords = {
+            '空气净化器', '净化器', 'A1000',
+            '搅拌机', 'B200',
+            '咖啡机', 'C300',
+            '吸尘器', 'D500',
+            '空气炸锅', 'E400',
+            '家电', '产品', '使用', '清洁', '故障', '规格', '参数', '功能'
+        }
     
     def _initialize_knowledge_base(self):
         """初始化知识库，进行文本分块"""
         self.chunks = self._split_text(knowledge_base)
+        print(f"Knowledge base initialized with {len(self.chunks)} chunks")
     
     def _split_text(self, text: str, chunk_size: int = 500) -> List[str]:
         """文本分块"""
@@ -313,8 +330,20 @@ class RAGSystem:
         similarity = len(intersection) / len(query_keywords)
         return similarity
     
+    def _is_appliance_related(self, query: str) -> bool:
+        """判断查询是否与家电相关"""
+        for keyword in self.appliance_keywords:
+            if keyword in query:
+                return True
+        return False
+    
     def retrieve_relevant_chunks(self, query: str, top_k: int = 3) -> List[str]:
         """检索相关文本块"""
+        # 首先判断是否与家电相关
+        if not self._is_appliance_related(query):
+            print(f"Query '{query}' is not appliance-related, returning empty chunks")
+            return []
+        
         similarities = []
         for i, chunk in enumerate(self.chunks):
             similarity = self._calculate_similarity(query, chunk)
@@ -322,15 +351,28 @@ class RAGSystem:
         
         # 排序并返回最相关的文本块
         similarities.sort(key=lambda x: x[1], reverse=True)
-        top_chunks = [self.chunks[i] for i, _ in similarities[:top_k] if _ > 0]
+        top_chunks = [self.chunks[i] for i, _ in similarities[:top_k] if _ > 0.5]  # 提高相似度阈值
+        print(f"Retrieved {len(top_chunks)} relevant chunks for query: {query}")
         return top_chunks
+    
+    def _safe_print(self, text: str):
+        """安全打印文本，处理编码问题"""
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            # 处理编码错误，替换无法编码的字符
+            safe_text = text.encode('gbk', 'replace').decode('gbk')
+            print(safe_text)
     
     def generate_answer(self, query: str) -> str:
         """生成回答"""
+        self._safe_print(f"Generating answer for query: {query}")
+        
         # 处理问候语
         greetings = ['你好', '您好', '嗨', 'Hello', 'hi', 'hey']
         for greeting in greetings:
             if greeting in query:
+                self._safe_print("Detected greeting, returning greeting response")
                 return "你好！我是家护公司客服助手，有什么关于家电产品的问题可以帮助你？"
         
         # 检索相关文本
@@ -343,6 +385,7 @@ class RAGSystem:
             
             # 生成回答
             try:
+                self._safe_print("Generating answer from knowledge base")
                 response = self.client.chat.completions.create(
                     model="deepseek-v4-flash",
                     messages=[
@@ -357,32 +400,39 @@ class RAGSystem:
                     ],
                     temperature=0.3
                 )
-                return response.choices[0].message.content
+                answer = response.choices[0].message.content
+                self._safe_print(f"Generated answer: {answer[:50]}...")
+                return answer
             except Exception as e:
-                print(f"生成回答时出错: {e}")
+                self._safe_print(f"生成回答时出错: {e}")
                 # 如果生成回答失败，直接返回检索到的相关文本
                 return relevant_chunks[0] if relevant_chunks else "抱歉，我无法回答这个问题。"
         else:
             # 知识库中没有相关内容，直接调用DeepSeek API
             try:
+                self._safe_print("No relevant chunks found, calling DeepSeek API directly")
+                # 使用更简单的系统提示
                 response = self.client.chat.completions.create(
                     model="deepseek-v4-flash",
                     messages=[
                         {
                             "role": "system",
-                            "content": "你是家护公司的客服助手，回答用户的问题。"
+                            "content": "你是一个友好的客服助手，用中文回答用户的问题。"
                         },
                         {
                             "role": "user",
                             "content": query
                         }
                     ],
-                    temperature=0.3
+                    temperature=0.5
                 )
-                return response.choices[0].message.content
+                answer = response.choices[0].message.content
+                self._safe_print(f"DeepSeek API answer: {answer[:50]}...")
+                return answer
             except Exception as e:
-                print(f"调用DeepSeek API时出错: {e}")
-                return "抱歉，我无法回答这个问题。"
+                self._safe_print(f"调用DeepSeek API时出错: {e}")
+                # 返回更友好的错误信息
+                return "抱歉，我暂时无法回答这个问题，请尝试其他问题。"
 
 # 全局RAG系统实例
 rag_system = None
@@ -391,5 +441,6 @@ def get_rag_system():
     """获取RAG系统实例"""
     global rag_system
     if rag_system is None:
+        print("Creating new RAG system instance")
         rag_system = RAGSystem()
     return rag_system
